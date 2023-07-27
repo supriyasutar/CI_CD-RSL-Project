@@ -24,7 +24,13 @@ jobs:
       run: chmod +x gradlew
     - name: Build with Gradle
       run: ./gradlew build
-
+    - name: Build PR APK
+      run: ./gradlew assembleDebug && mv app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/debug/app-pr.apk
+    - name: Upload APK
+      uses: actions/upload-artifact@v1
+      with:
+          name: apk_pr
+          path: app/build/outputs/apk/debug/app-pr.apk
 
   RunTests:
     runs-on: macOS-latest
@@ -54,7 +60,7 @@ jobs:
       if: always()
 
   GenerateCoverageReport:
-    runs-on: macOS-latest
+    runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v3
     - name: set up JDK 17
@@ -82,9 +88,9 @@ jobs:
         name: coverage report
         path: app/build/reports/jacoco/testDebugUnitTestCoverage/html
         
-    # Calucalate APK diff 
-    # Checkout main branch and build the APK
-  build-main:
+        
+# Checkout main branch and build the APK
+  GenerateMainBranchAPK:
     runs-on: macOS-latest
     steps:
     - uses: actions/checkout@v3
@@ -107,45 +113,45 @@ jobs:
       with:
         name: apk_master
         path: app/build/outputs/apk/debug/app-master.apk
-        
-# Checkout PR branch and build the APK
-  build-pr:
-      runs-on: macOS-latest
-      needs: build-main
-      steps:
-        - uses: actions/checkout@v3
-        - name: set up JDK 17
-          uses: actions/setup-java@v3
-          with:
-            java-version: '17'
-            distribution: 'temurin'
-            cache: gradle
-        - name: Grant execute permission for gradlew
-          run: chmod +x gradlew
-        - name: Build PR APK
-          run: ./gradlew assembleDebug && mv app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/debug/app-pr.apk
-        - name: Upload APK
-          uses: actions/upload-artifact@v1
-          with:
-            name: apk_pr
-            path: app/build/outputs/apk/debug/app-pr.apk
-            
+     
+     
+# Calucalate APK diff        
   apk-diff:
-            needs: [build-main, build-pr]
-            runs-on: macOS-latest
-            steps:
-            - uses: actions/checkout@v1
-            - name: Install diffuse
-              run: brew install JakeWharton/repo/diffuse
-            - name: download artifact
-              uses: actions/download-artifact@v2.1.1
-              with:
-                name: apk_master
-                path: app/build/outputs/apk/debug/app-master
-            - name: download artifact
-              uses: actions/download-artifact@v2.1.1
-              with:
-                name: apk_pr
-                path: app/build/outputs/apk/debug/app-pr
-            - name: run differ
-              run: diffuse diff app/build/outputs/apk/debug/app-master/app-master.apk app/build/outputs/apk/debug/app-pr/app-pr.apk
+    needs: [BuildApp, GenerateMainBranchAPK]
+    runs-on: macOS-latest
+    steps:
+      - uses: actions/checkout@v1
+      - name: Install diffuse
+        run: brew install JakeWharton/repo/diffuse
+      - name: download artifact
+        uses: actions/download-artifact@v2.1.1
+        with:
+          name: apk_master
+          path: app/build/outputs/apk/debug/app-master
+      - name: download artifact
+        uses: actions/download-artifact@v2.1.1
+        with:
+          name: apk_pr
+          path: app/build/outputs/apk/debug/app-pr
+      - name: run differ
+        run: diffuse diff app/build/outputs/apk/debug/app-master/app-master.apk app/build/outputs/apk/debug/app-pr/app-pr.apk
+
+
+  DeployApp:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Bump release version
+        id: bump_version
+        uses: christian-draeger/increment-semantic-version@1.1.0
+        with:
+          current-version:  '1.10.10'
+          version-fragment: 'feature'
+      - name: Docker Build & Push Action
+        uses: mr-smithers-excellent/docker-build-push@v6.2
+        with:
+          image: supriyasutar/CI-CD-Project-${{ steps.bump_version.outputs.next-version }}
+          registry: docker.io
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+    
